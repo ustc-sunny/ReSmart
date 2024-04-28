@@ -25,6 +25,8 @@ class Market:
         self.num_arms = num_arms
         self.num_time_slots = num_time_slots
         self.arms = [Arm(i, self.num_players) for i in range(self.num_arms)]
+        # for arm in self.arms:
+        #     arm.player_preference = self.arms[0].player_preference
         self.choosing_result = np.full((self.num_time_slots, self.num_players), -1)  # 用于记录每个时间步的选择结果
         self.choosing_result[0] = np.random.randint(0, self.num_arms, self.num_players)
         self.matching_result = np.full((self.num_time_slots, self.num_players), -1)  # 初始化matching_result矩阵
@@ -38,9 +40,10 @@ class Market:
         self.r= r
         self.X = np.zeros((num_players, num_arms))
         self.Y = np.zeros((num_players, num_arms))
+        self.candidate_arm = [[] for _ in range(num_arms)]
 
-        self.regrets = [[] for _ in range(num_players)]
-
+        #self.regrets = [[] for _ in range(num_players)]
+        self.regrets = np.zeros((self.num_players, self.num_time_slots))
     def update_feasible_set(self, time_slot):
         self.feasible_set = [[] for _ in range(self.num_players)]
         #将当前匹配的每个arm的最大preference所对应的player_id输出成一维矩阵
@@ -64,14 +67,10 @@ class Market:
                     k += 1
 
     def run_market(self):
+        for arm in self.arms:
+            print(arm.player_preference)
         for time_slot in range(1, self.num_time_slots):
-            print('&&&')
-            #initialization
-            #Update the feasible set
-            self.update_feasible_set(time_slot)
-            print(self.feasible_set)
-            self.X = np.zeros((self.num_players, self.num_arms))
-            self.Y = np.zeros((self.num_players, self.num_arms))
+            print(time_slot)
             #start algorithm
             if self.k == 1:
                #Set 𝑛𝑡𝑖,𝑗 = 0, 𝛼𝑖,𝑗 = 1, 𝛽𝑖,𝑗 = 1, ∀𝑖 ∈ T, ∀𝑗 ∈ U
@@ -79,15 +78,23 @@ class Market:
                self.alpha = np.ones((self.num_players, self.num_arms))
                self.beta = np.ones((self.num_players, self.num_arms))
                #∀𝑖 ∈ T, 𝑎1 (𝑖) = 𝑗, 𝑗 ∼ U uniformly at random.
-               self.choosing_result[0] = np.random.randint(0, self.num_arms, self.num_players)
-               self.matching_result[0] = self.choosing_result[0]
+               self.choosing_result[time_slot - 1] = np.random.randint(0, self.num_arms, self.num_players)
+               self.matching_result[time_slot - 1] = self.choosing_result[time_slot - 1]
             #Distributed Task Matching using ThompsonSampling (DTTS) start.
+            #print(self.matching_result)
+            #Update the feasible set
+            self.update_feasible_set(time_slot)
+            #print(self.feasible_set)
+            self.X = np.zeros((self.num_players, self.num_arms))
+            self.Y = np.zeros((self.num_players, self.num_arms))
+            self.candidate_arm = [[] for _ in range(self.num_arms)]
             for i in range(self.num_players):
                 #𝜃𝑖,𝑗 ∼ 𝐵𝑒 (𝛼𝑖,𝑗, 𝛽𝑖,𝑗)
                 for j in range(self.num_arms):
-                    self.theta[i][j] = beta(self.alpha[i][j], self.beta[i][j]).rvs()
+                    self.theta[i][j] = np.random.beta(self.alpha[i][j], self.beta[i][j])
+                    #self.theta[i][j] = np.random.normal(loc=self.r[i][j], scale=10, size=None)
                 #Draw 𝐵𝑖(𝑡) ∼ 𝐵𝑒𝑟(𝜆) independently.
-                lambda_prob = 0.2    #lambda
+                lambda_prob = 0.1    #lambda
                 if random.random() < lambda_prob:#lambda
                     #set at(i) = at-1(i)
                     self.choosing_result[time_slot][i] = self.choosing_result[time_slot - 1][i]
@@ -103,23 +110,23 @@ class Market:
                                 a = j
                         #Set 𝑎𝑡 (𝑖) = 𝑎
                         self.choosing_result[time_slot][i] = a
+                self.candidate_arm[self.choosing_result[time_slot][i]].append(i)
                 #if 𝜋¯𝑎𝑡 (𝑖)(𝑖) ≻𝑎𝑡 (𝑖) 𝜋¯𝑖′ (𝑖),𝑖′ ∈ T𝑡𝑖,j
-                if self.arms[self.choosing_result[time_slot][i]].player_preference[0] == i:
-                    self.matching_result[time_slot][i] = a
+                matching_result = self.choosing_result[time_slot][i]
+                if self.candidate_arm[matching_result][np.argmin([np.where(self.arms[matching_result].player_preference == k) for k in self.candidate_arm[matching_result]])] == i:
                     #Obtain a utility 𝑋t(i, mt(i))，正态分布
-                    #self.X[i][a] = random.gauss(self.r[i][a], 1)########正太分布大于1不能后续用伯努利
+                    #self.X[i][a] = np.random.noraml(self.r[i][a], 1)########正太分布大于1不能后续用伯努利
                     #draw 𝑌𝑡(i, mt(i))
                     #print(self.X[i][a])
-                    if random.random() < self.r[i][a]:
-                        self.Y[i][a] = 1
+                    if random.random() < self.r[i][matching_result]:
+                        self.Y[i][matching_result] = 1
                     else:
-                        self.Y[i][a] = 0
+                        self.Y[i][matching_result] = 0
                     #Update parameter of Beta distribution 𝐵𝑒:
-                    self.alpha[i][a] += self.Y[i][a]
-                    self.beta[i][a] = self.beta[i][a] + 1 - self.Y[i][a]
-                #update regret
-                #if not self.regrets[i]:
-                #    self.regrets[i].append(self.r[i][])
+                    self.alpha[i][matching_result] += self.Y[i][matching_result]
+                    self.beta[i][matching_result] = self.beta[i][matching_result] + 1 - self.Y[i][matching_result]
+                    #update regret
+                    self.regrets[i][time_slot] = self.regrets[i][time_slot - 1] + max(self.r[i]) - self.Y[i][matching_result]
             if self.k <= self.L:########self.L???
                 self.k += 1
             else:
@@ -130,7 +137,7 @@ def main():
     num_players = 5
     num_arms = 5
     num_episodes = 1
-    sigle_time_slots = 10
+    sigle_time_slots = 400
     stable_index = []
     num_time_slots = sigle_time_slots * num_episodes
     # for round in range(num_instance):    
@@ -148,17 +155,22 @@ def main():
         
     # stable_mean = stable_sum/num_instance
     
-    # time_slots = range(1, num_episodes + 1)  # 时间槽
-    # plt.plot(time_slots, stable_mean, label='N=5')
-    # plt.xlabel('Episode')
-    # plt.ylabel('Stable probability')
-    # plt.title('Stable probability')
-    # plt.legend()
-    # plt.grid(True)
-    # plt.show()
     r = np.random.uniform(low=0, high=1, size=(5, 5))
     market = Market(num_players, num_arms, num_time_slots, r)
     market.run_market()
+
+    last_regret = market.regrets[:, -1]
+    max_index = np.argmax(np.abs(last_regret))
+    print(market.regrets)
+    time_slots = range(1, num_time_slots + 1)  # 时间槽
+    av_regret = np.sum(market.regrets, axis=0)/len(market.regrets[0])
+    plt.plot(time_slots, av_regret , marker = 'o')
+    plt.xlabel('time')
+    plt.ylabel('regret')
+    plt.title('regret')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
     #stable_index.append(market.stable_index)
     # 平均累积奖励柱状图
     # 准备数据
