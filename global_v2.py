@@ -6,10 +6,11 @@ Created on Mon Oct  9 21:30:06 2023
 """
 
 import random
-import numpy as np
+import numpy as np # type: ignore
 import math
 import matplotlib.pyplot as plt
 from scipy.stats import beta
+from tqdm import *
 #GS UCB TS
 
 class Arm:
@@ -20,10 +21,11 @@ class Arm:
 
 
 class Market:
-    def __init__(self, num_players, num_arms, num_time_slots, r):
+    def __init__(self, num_players, num_arms, num_time_slots, r, L):
         self.num_players = num_players
         self.num_arms = num_arms
         self.num_time_slots = num_time_slots
+        self.L = L
         self.arms = [Arm(i, self.num_players) for i in range(self.num_arms)]
         # for arm in self.arms:
         #     arm.player_preference = self.arms[0].player_preference
@@ -35,7 +37,6 @@ class Market:
         self.beta = np.ones((self.num_players, self.num_arms))
         self.theta = np.zeros((self.num_players, self.num_arms))
         self.k = 1
-        self.L = 100
         self.feasible_set = [[] for _ in range(num_players)]
         self.r= r
         self.X = np.zeros((num_players, num_arms))
@@ -44,6 +45,10 @@ class Market:
 
         #self.regrets = [[] for _ in range(num_players)]
         self.regrets = np.zeros((self.num_players, self.num_time_slots))
+        self.utilities = np.zeros((self.num_players, self.num_time_slots))
+    def update_r(self):
+        r1 = np.random.uniform(low=0, high=1, size=(self.num_players, self.num_arms))
+        self.r = r1
     def update_feasible_set(self, time_slot):
         self.feasible_set = [[] for _ in range(self.num_players)]
         #将当前匹配的每个arm的最大preference所对应的player_id输出成一维矩阵
@@ -69,8 +74,8 @@ class Market:
     def run_market(self):
         for arm in self.arms:
             print(arm.player_preference)
-        for time_slot in range(1, self.num_time_slots):
-            print(time_slot)
+        for time_slot in tqdm(range(1, self.num_time_slots)):
+            #print(time_slot)
             #start algorithm
             if self.k == 1:
                #Set 𝑛𝑡𝑖,𝑗 = 0, 𝛼𝑖,𝑗 = 1, 𝛽𝑖,𝑗 = 1, ∀𝑖 ∈ T, ∀𝑗 ∈ U
@@ -78,6 +83,7 @@ class Market:
                self.alpha = np.ones((self.num_players, self.num_arms))
                self.beta = np.ones((self.num_players, self.num_arms))
                #∀𝑖 ∈ T, 𝑎1 (𝑖) = 𝑗, 𝑗 ∼ U uniformly at random.
+               self.update_r()
                self.choosing_result[time_slot - 1] = np.random.randint(0, self.num_arms, self.num_players)
                self.matching_result[time_slot - 1] = self.choosing_result[time_slot - 1]
             #Distributed Task Matching using ThompsonSampling (DTTS) start.
@@ -104,7 +110,7 @@ class Market:
                     if not self.feasible_set:
                         self.choosing_result[time_slot][i] = self.choosing_result[time_slot - 1][i]
                     else:
-                        a = 0
+                        a = self.choosing_result[time_slot - 1][i]## Let a = self.choosing_result[time_slot - 1][i]
                         for j in range(self.num_arms):
                             if j in self.feasible_set[i] and self.theta[i][j] > self.theta[i][a]:
                                 a = j
@@ -112,6 +118,8 @@ class Market:
                         self.choosing_result[time_slot][i] = a
                 self.candidate_arm[self.choosing_result[time_slot][i]].append(i)
                 #if 𝜋¯𝑎𝑡 (𝑖)(𝑖) ≻𝑎𝑡 (𝑖) 𝜋¯𝑖′ (𝑖),𝑖′ ∈ T𝑡𝑖,j
+
+            for i in range(self.num_players):
                 matching_result = self.choosing_result[time_slot][i]
                 if self.candidate_arm[matching_result][np.argmin([np.where(self.arms[matching_result].player_preference == k) for k in self.candidate_arm[matching_result]])] == i:
                     #Obtain a utility 𝑋t(i, mt(i))，正态分布
@@ -126,7 +134,9 @@ class Market:
                     self.alpha[i][matching_result] += self.Y[i][matching_result]
                     self.beta[i][matching_result] = self.beta[i][matching_result] + 1 - self.Y[i][matching_result]
                     #update regret
-                    self.regrets[i][time_slot] = self.regrets[i][time_slot - 1] + max(self.r[i]) - self.Y[i][matching_result]
+                    self.regrets[i][time_slot] = self.regrets[i][time_slot - 1] + min(self.r[i]) - self.Y[i][matching_result]
+                    self.utilities[i][time_slot] = self.utilities[i][time_slot - 1] + self.Y[i][matching_result]
+                    #self.regrets[i][time_slot] = min(self.r[i]) - self.Y[i][matching_result]
             if self.k <= self.L:########self.L???
                 self.k += 1
             else:
@@ -134,12 +144,13 @@ class Market:
 
 def main():
     # 设置参数
-    num_players = 5
-    num_arms = 5
+    num_players = 50
+    num_arms = 50
     num_episodes = 1
-    sigle_time_slots = 400
+    sigle_time_slots = 500
     stable_index = []
     num_time_slots = sigle_time_slots * num_episodes
+    L = 500
     # for round in range(num_instance):    
     #     # 创建市场并运行
     #     print(round)
@@ -155,8 +166,8 @@ def main():
         
     # stable_mean = stable_sum/num_instance
     
-    r = np.random.uniform(low=0, high=1, size=(5, 5))
-    market = Market(num_players, num_arms, num_time_slots, r)
+    r = np.random.uniform(low=0, high=1, size=(num_players, num_arms))
+    market = Market(num_players, num_arms, num_time_slots, r, L)
     market.run_market()
 
     last_regret = market.regrets[:, -1]
@@ -164,7 +175,9 @@ def main():
     print(market.regrets)
     time_slots = range(1, num_time_slots + 1)  # 时间槽
     av_regret = np.sum(market.regrets, axis=0)/len(market.regrets[0])
-    plt.plot(time_slots, av_regret , marker = 'o')
+    av_utility = np.sum(market.utilities, axis=0)/len(market.utilities[0])
+    #plt.plot(time_slots, av_regret, marker = 'o')
+    plt.plot(time_slots, av_utility, marker = 'o')
     plt.xlabel('time')
     plt.ylabel('regret')
     plt.title('regret')
